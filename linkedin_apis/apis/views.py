@@ -1,17 +1,37 @@
 from django.shortcuts import render
-from .config import LinkedinConfig
+from decouple import config
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view
 import requests
-from .config import LinkedinConfig
 import webbrowser
+import json
+import random
+import string
 from urllib.parse import urlparse, parse_qs
 from .models import OauthUser
-import json
 
-# creating objects
-config = LinkedinConfig()
+# from django.shortcuts import redirect
+
+
+# creating csrf accesstoken
+def create_CSRF_token():
+    """
+    this function is use for creating csrf token/ random string to
+    protect CSRF token.
+    """
+    random_str = string.ascii_lowercase
+    token = "".join(random.choice(random_str) for i in range(20))
+    return token
+
+
+# get env config data
+response_type = config("response_type")
+client_id = config("client_id")
+client_Secret = config("client_Secret")
+redirect_uri = config("redirect_uri")
+scope = config("scope")
+state = create_CSRF_token()
 
 
 # oauth2 with linkedin
@@ -20,35 +40,37 @@ def oauth(request):
     # linkedin oauth url
     api_url = "https://www.linkedin.com/oauth/v2"
     params = {
-        "response_type": config.response_type,
-        "client_id": config.client_id,
-        "redirect_uri": config.redirect_uri,
-        "scope": config.scope,
-        "state": config.state,
+        "response_type": response_type,
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+        "state": state,
     }
     response = requests.get(f"{api_url}/authorization", params=params)
+
     url = response.url
-    webbrowser.open(url)
+    res = webbrowser.open(url)
+    if res == True:
+        return Response(status=status.HTTP_200_OK)
+    else:
+        return Response(status=status.HTTP_400_BAD_REQUEST)
 
 
-# linkedin access token
+# linkedin access token get
 @api_view(["POST"])
 def access_token(request):
     access_token_url = "https://www.linkedin.com/oauth/v2/accessToken"
-
-    url = urlparse(
-        "http://127.0.0.1:8000/?code=AQRaPLYyqbxTeYpXs7BYWOMb-mWV-AnRnm5MgCBDnYiu5PBkEUvSnL9OctZn-aYLgAzLsWUZP48Eb0A_aDwn13MA35ppRKZRpx09rWmK2f-eJePdHKJLjzd5THfQFneP3NnUY2tL9s7iWX0C9RLnTQGh3ivIDkmYVw0xFoDDdH6ghzFpF1h0o2f_gYYJyVHZwfr27xabqo5cit19EWU&state=DCEeFWf45A53sdfKef428"
-    )
+    redirect_url = request.data["redirect_url"]
+    url = urlparse(redirect_url)
     url = parse_qs(url.query)
     code = url["code"][0]
-
     # get access token
     data = {
         "grant_type": "authorization_code",
         "code": code,
-        "client_id": config.client_id,
-        "client_secret": config.client_Secret,
-        "redirect_uri": config.redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_Secret,
+        "redirect_uri": redirect_uri,
     }
     response = requests.post(access_token_url, data=data)
     return Response(response.json())
@@ -56,12 +78,15 @@ def access_token(request):
 
 # should be  a  function and every time we have to get the user id by passing token
 def getProfile(token):
+    headers = {
+        "Authorization": token,
+        "Content-type": "application/json",
+    }
     response = requests.get(
         "https://api.linkedin.com/v2/me",
-        headers={"Authorization": token, "Content-type": "application/json"},
+        headers=headers,
     )
-
-    # Extract Data from response
+    # extracting data that we getting from response
     response = response.json()
     social_id = response["id"]
     first_name = response["localizedFirstName"]
@@ -79,7 +104,7 @@ def getProfile(token):
         return social_id
 
 
-# register for image
+# register for linkedin image
 def reg_image(token, author):
     api_url = "https://api.linkedin.com/v2/assets?action=registerUpload"
     post_data = {
@@ -98,12 +123,12 @@ def reg_image(token, author):
     return response
 
 
+
 # image upload
 def upload_image(token, uploadUrl, image, assets):
     api_url = f"{uploadUrl}"
     headers = {
         "Authorization": token,
-        "X-Restli-Protocol-Version": "2.0.0",
         "Content-Type": "image/jpeg,image/png,image/gif",
     }
     requests.post(api_url, headers=headers, data=image.read())
@@ -111,7 +136,6 @@ def upload_image(token, uploadUrl, image, assets):
     # image upload status
     header = {
         "Authorization": token,
-        "X-Restli-Protocol-Version": "2.0.0",
         "Content-Type": "multipart/form-data",
     }
 
@@ -125,9 +149,10 @@ def upload_image(token, uploadUrl, image, assets):
 @api_view(["POST"])
 def linkedin_post(request):
     header = request.headers
-    description = request.data['description']
+    description = request.data["description"]
 
     token = header["Authorization"]
+    # get user id
     get_user = getProfile(token)
     author = f"urn:li:person:{get_user}"
     # call function for register image
@@ -152,22 +177,21 @@ def linkedin_post(request):
         "X-Restli-Protocol-Version": "2.0.0",
         "Content-Type": "application/json",
     }
+    # getting
     media = f"urn:li:digitalmediaAsset:{image_update_url}"
     payload = {
         "author": author,
         "lifecycleState": "PUBLISHED",
         "specificContent": {
             "com.linkedin.ugc.ShareContent": {
-                "shareCommentary": {
-                    "text": description
-                },
+                "shareCommentary": {"text": description},
                 "shareMediaCategory": "IMAGE",
                 "media": [
                     {
                         "status": "READY",
-                        "description": {"text" : description},
+                        "description": {"text": description},
                         "media": media,
-                        "title": {"text" :"image" },
+                        "title": {"text": "image"},
                     }
                 ],
             }
@@ -177,5 +201,5 @@ def linkedin_post(request):
 
     post_url = "https://api.linkedin.com/v2/ugcPosts"
 
-    response = requests.post(post_url,headers= header,json = payload)
-    return Response(response.json())
+    response = requests.post(post_url, headers=header, json=payload)
+    return Response({'data':response.json(),'msg':'successfully post'},status=status.HTTP_201_CREATED)
