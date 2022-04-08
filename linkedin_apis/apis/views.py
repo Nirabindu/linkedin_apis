@@ -123,7 +123,6 @@ def reg_image(token, author):
     return response
 
 
-
 # image upload
 def upload_image(token, uploadUrl, image, assets):
     api_url = f"{uploadUrl}"
@@ -146,6 +145,7 @@ def upload_image(token, uploadUrl, image, assets):
     return url_id
 
 
+# post image and description on linkedin
 @api_view(["POST"])
 def linkedin_post(request):
     header = request.headers
@@ -177,7 +177,6 @@ def linkedin_post(request):
         "X-Restli-Protocol-Version": "2.0.0",
         "Content-Type": "application/json",
     }
-    # getting
     media = f"urn:li:digitalmediaAsset:{image_update_url}"
     payload = {
         "author": author,
@@ -202,4 +201,7 @@ def linkedin_post(request):
     post_url = "https://api.linkedin.com/v2/ugcPosts"
 
     response = requests.post(post_url, headers=header, json=payload)
-    return Response({'data':response.json(),'msg':'successfully post'},status=status.HTTP_201_CREATED)
+    return Response(
+        {"data": response.json(), "msg": "successfully post"},
+        status=status.HTTP_201_CREATED,
+    )
